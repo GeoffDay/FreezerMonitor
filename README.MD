@@ -6,9 +6,10 @@ indicate a power failure at the shed. Using an ethernet system requires a dedica
 indicate failure neither of which I am up to at the moment. There are two freezers and a coolroom, two sensors may be enough since food 
 will go from the freezers to the coolroom prior to an event, three sensors would cover all eventualities. 
 The slave stations will display temps and status and sound an alarm if freezer temps exceed a nominal value. Lets say 2 degrees c. 
-We have two alarm conditions   1: any or all of the sensors exceeding 2 degrees C. 
-                               2: power outage. 
-Power outage may be indicated using battery backup to send a signal if charging current stops or simply by no signal. This is the 
-simplest way and if we retransmit each monitoring stations readings to the other stations we have a more robust system. Each monitoring 
-station will send the last recieved temps with a rt1 2 or 3 prepended. If a station stops receiving temp readings from the master then 
-after 10 minutes will flag an error and sound an alarm.
+We have three alarm conditions    1: over temp - any or all of the sensors exceeding 0 degrees C. 
+                                  2: disconnected sensor. 
+                                  3: power outage.
+Power outage could be indicated using battery backup to send a signal if charging current stops. More likely we will assume no signal 
+means power failure. At present I am 4km from the shed which is well within advertised range. Several others live closer.  
+Assuming signal levels are better than marginal this should be OK. We will assume that if no signal is recieved for 30 mins then there 
+is a power outage and an alarm will sound.
