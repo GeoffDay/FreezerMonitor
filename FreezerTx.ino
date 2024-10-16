@@ -46,15 +46,15 @@ float ave3 = 0;
 float prev1 = 0;
 float prev2 = 0;
 float prev3 = 0;
-short hex1 = 0;
-short hex2 = 0;
-short hex3 = 0;
+
 int count = 0;              // keep count of the samples
-unsigned long nextTx = 0;
+unsigned long nextTx = 0;   // were cou
 int pause = 0;
 char prefix = 'n';          // & is the normal prefix, ~ is the paused prefix
 bool OT = false;            // not over zero
 bool trending = true;       // cooling
+long tmp = 0;
+char msg[10];
 
 void setup() {
   lcd.begin(16, 2);          // set up the LCD's number of columns and rows:
@@ -65,11 +65,10 @@ void setup() {
 
   pinMode(A3, INPUT_PULLUP); // use A3 analog pin as a digital input to read the pause switch
 
-
-  Serial.begin(9600);        // sending to the serial monitor
+  Serial.begin(9600);        // setup ending to the serial monitor
   
   while (!Serial);
-  Serial.println("LoRa Sender");
+  Serial.println("LoRa Sender"); // ID
  
   if (!LoRa.begin(433E6)) {   // setting up the LoRa module
     Serial.println("Starting LoRa failed!");
@@ -83,6 +82,7 @@ void loop() {
   temp2 = scaleValue(analogRead(A1), 500, scale);
   temp3 = scaleValue(analogRead(A2), 500, scale);
 
+  // display on LCD
   lcd.setCursor(0,0);
   lcd.print(temp1, 1);
   lcd.print(" ");
@@ -90,63 +90,66 @@ void loop() {
   lcd.print(" ");
   lcd.print(temp3, 1);  
 
-  lcd.setCursor(0,1);
+  lcd.setCursor(0,1);   // next line
 
-  if (digitalRead(A3) == LOW) { // have we paused the alarms while the freezer is opened?           
-    pause = 1800;               // 1800 seconds - 30 mins
+  // pause button - open freezer without setting off alarm - pause alarms for 30 mins
+  if (digitalRead(A3) == LOW) pause = 1800; // 1800 seconds - 30 mins
+
+  if (pause > 0) {              // if pause is positive then decrement
+    pause -= 1;                 // this loop goes every second 
+    prefix = 'p';               // and change the prefix so that the remote station knows too
     lcd.print("Al. Paused ");   // print a message
-    lcd.print(1800/60);
-    lcd.print("min");
-  } else {                      // and don't do any local alarming
-    if ((temp1 <-20.0) || (temp2 <-20.0) || (temp3 <-20.0)) lcd.print("Sensor Fault");
+    lcd.print(pause/60);
+    lcd.println("min");
+  } else {
+    prefix = 'n';               // put it back to normal
+    if ((temp1 <-20.0) || (temp2 <-20.0) || (temp3 <-20.0)) lcd.println("Sensor Fault");
     if ((temp1 > 0.0) || (temp2 > 0.0) || (temp3 > 0.0)) {
       lcd.print("Over Temp");
       OT = true;            // over zero!!!
     }
   }
 
-  if (pause > 0) {              // if pause is positive then decrement
-    pause -= 1;                 // this loop goes every second 
-    prefix = 'p';               // and change the prefix so that the remote station knows too
-  }  else {
-    prefix = 'n';               // put it back to normal
-  }
-
-  count = count + 1;
-  ave1 = ave1 + temp1; 
+  count = count + 1;        // how many samples
+  ave1 = ave1 + temp1;      // sum many values
   ave2 = ave2 + temp2;
   ave3 = ave3 + temp3;
   
-  delay(1000);
+  delay(1000);              // wait a second
 
   if (millis() > nextTx){
-    nextTx = millis() + 60000;   // current time + 10 mins in milliseconds 
+    nextTx = millis() + 20000;   // current time + 10 mins in milliseconds 
     
     ave1 = ave1 / count;         // lets calc the ave temp over last 10 mins
-    ave2 = ave2 / count;         // and stuff it into temp now.
+    ave2 = ave2 / count;         // and stuff it into ave now.
     ave3 = ave3 / count;
     count = 0;                    // zero the count
   
     prev1 = ave1;                // make a copy of the previous temps
     prev2 = ave2;
     prev3 = ave3;
-   
-  Serial.println(constructReading(ave1, prev1), HEX);
-    // send packet
-    LoRa.beginPacket();
-    LoRa.print(prefix);
-    LoRa.print(constructReading(ave1, prev1), HEX);
-    LoRa.print(constructReading(ave2, prev2), HEX);
-    LoRa.print(constructReading(ave3, prev3), HEX);
-    LoRa.endPacket();
 
-    Serial.print(" Temp:");
+    // create a 30 bit long version of combined temps and trends 
+    tmp = (constructReading(ave1, prev1) << 20) + (constructReading(ave2, prev2) << 10) + constructReading(ave3, prev3);
+    ltoa(tmp, msg, 36);   // create a string version encoded to base 36
+
+    // send packet
+    LoRa.beginPacket();   // setup LoRa
+    LoRa.print(prefix);   // this is the first char. n for normal, p for paused
+    LoRa.print(msg);      // this is the 3 samples encoded
+    LoRa.endPacket();     // end the packet. May need to add a checksum for stability
+
+    Serial.print("long:");
+    Serial.println(tmp);
+    Serial.print("msg:"); 
+    Serial.println(msg);
+    Serial.print("Temp:");
     Serial.print(ave1);
     Serial.print("C ");
     Serial.print(ave2);
     Serial.print("C ");
     Serial.print(ave3);
-    Serial.print("C ");
+    Serial.println("C ");
   }
 }
 
@@ -154,13 +157,13 @@ float scaleValue(int value, int offset, float gain){
   return ((value - offset) * gain) / 10.0;
 }
 
-int constructReading(float temp, float prev){
-  short tVal = short(temp * 10);
+// remap a 9 bit range and work out the trend of temp - important for the pause
+long constructReading(float temp, float prev){
+  long tVal = short(temp * 10);
   
   tVal = map(tVal, -150, 361, 0, 511);
-  if (temp <-20.0) bitSet(tVal, 9);     // Fault - if temp below -20C then it's most likely a faulty sensor
-  if (temp > 0.0) bitSet(tVal, 10);     // Over temp - if its above zero we have a problem so alarm again
-  if (temp <= prev) bitSet(tVal, 11);   // Trend - if temp less than or equal to previous then its OK
+
+  if (temp <= prev) bitSet(tVal, 9);   // Trend - if temp less than or equal to previous then its OK
   return tVal;
 }
 
