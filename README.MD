@@ -10,6 +10,8 @@ We have three alarm conditions    1: over temp - any or all of the sensors excee
                                   2: disconnected sensor. 
                                   3: power outage.
 Power outage could be indicated using battery backup to send a signal if charging current stops. More likely we will assume no signal 
-means power failure. At present I am 4km from the shed which is well within advertised range. Several others live closer.  
-Assuming signal levels are better than marginal this should be OK. We will assume that if no signal is recieved for 30 mins then there 
-is a power outage and an alarm will sound.
+means power failure. Assuming signal levels are better than marginal this should be OK. We will assume that if no signal is recieved 
+for 30 mins then there is a power outage and an alarm will sound. At present I am 4km from the shed which is well within advertised range. 
+The LoRa needs a clear line of sight between modules to operate correctly, not sure thats going to work from my home to the shed. 
+Several others live closer, so they may be better suited to host this device.
+
