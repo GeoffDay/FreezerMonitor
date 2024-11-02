@@ -97,24 +97,24 @@ void loop() {
 
   if (pause > 0) {              // if pause is positive then decrement
     pause -= 1;                 // this loop goes every second 
-    prefix = 'p';               // and change the prefix so that the remote station knows too
+    prefix = '~';               // and change the prefix so that the remote station knows too
     lcd.print("Al. Paused ");   // print a message
     lcd.print(pause/60);
     lcd.println("min");
   } else {
-    prefix = 'n';               // put it back to normal
+    prefix = '|';               // put it back to normal
     if ((temp1 <-20.0) || (temp2 <-20.0) || (temp3 <-20.0)) lcd.println("Sensor Fault");
     if ((temp1 > 0.0) || (temp2 > 0.0) || (temp3 > 0.0)) {
       lcd.print("Over Temp");
       OT = true;            // over zero!!!
     }
   }
-
+    
   count = count + 1;        // how many samples
   ave1 = ave1 + temp1;      // sum many values
   ave2 = ave2 + temp2;
   ave3 = ave3 + temp3;
-  
+
   delay(1000);              // wait a second
 
   if (millis() > nextTx){
@@ -124,7 +124,7 @@ void loop() {
     ave2 = ave2 / count;         // and stuff it into ave now.
     ave3 = ave3 / count;
     count = 0;                    // zero the count
-  
+ 
     prev1 = ave1;                // make a copy of the previous temps
     prev2 = ave2;
     prev3 = ave3;
@@ -137,6 +137,7 @@ void loop() {
     LoRa.beginPacket();   // setup LoRa
     LoRa.print(prefix);   // this is the first char. n for normal, p for paused
     LoRa.print(msg);      // this is the 3 samples encoded
+    LoRa.print('.');
     LoRa.endPacket();     // end the packet. May need to add a checksum for stability
 
     Serial.print("long:");
@@ -144,12 +145,15 @@ void loop() {
     Serial.print("msg:"); 
     Serial.println(msg);
     Serial.print("Temp:");
-    Serial.print(ave1);
+    Serial.print(ave1, 1);
     Serial.print("C ");
-    Serial.print(ave2);
+    Serial.print(ave2, 1);
     Serial.print("C ");
-    Serial.print(ave3);
+    Serial.print(ave3, 1);
     Serial.println("C ");
+    ave1 = 0;
+    ave2 = 0; 
+    ave3 = 0;
   }
 }
 
