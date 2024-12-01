@@ -1,8 +1,6 @@
-//WhatsApp_test.ino This code sends messages using the whatsapp on my mobile phone. 
+//WhatsApp_test.ino  This code sends messages using the whatsapp on my mobile phone. 
 // the plan is to send a general freezer temp at 7 oclock morning and night and an 
-// alarm if the temp exceeds zero. Currently this code connects to the internet, gets NTP time,
-// finds the temp sensors and displays the temp on serial and displays time on the LCD.
-
+// alarm if the temp exceeds zero.
 #include <LiquidCrystal_I2C.h>
 #include <ESP8266WiFi.h>                    // wifi 
 #include <WiFiUdp.h>                        // ntp time uses this
@@ -13,15 +11,12 @@
 // initialize the library by associating any needed LCD interface pins with the arduino pin number it is connected to
 LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-//const int rs = 8, en = 7, d4 = 6, d5 = 5, d6 = 4, d7 = 3;
-//LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
-
 const char* ssid = "Telstra55B601";
 const char* password = "6xcrs24vng";
 
 //*********************************Time server***********************************************
-unsigned int localPort = 2390;  // local port to listen for UDP packets
-IPAddress timeServerIP;         // time.nist.gov NTP server address. Don't hardwire the IP address or we won't get the benefits of the pool.
+unsigned int localPort = 2390;        // local port to listen for UDP packets
+IPAddress timeServerIP;               // time.nist.gov NTP server address. Don't hardwire the IP address or we won't get the benefits of the pool.
 const char* ntpServerName = "time.nist.gov";
 const int NTP_PACKET_SIZE = 48;       // NTP time stamp is in the first 48 bytes of the message
 byte packetBuffer[NTP_PACKET_SIZE];   // buffer to hold incoming and outgoing packets
@@ -31,10 +26,17 @@ WiFiUDP udp;                          // A UDP instance to let us send and recei
 #define ONE_WIRE_BUS 12               // Data wire is connected to GPIO12 on pin 6
 OneWire oneWire(ONE_WIRE_BUS);        // Setup a oneWire instance to communicate with any OneWire device
 DallasTemperature sensors(&oneWire);  // Pass oneWire reference to DallasTemperature library
-DeviceAddress insideThermometer;      // arrays to hold device address
+DeviceAddress deviceAddress;          // arrays to hold device address
+const char *sensorNames[3] = {"Fridge 1", "Fridge 2", "Coolroom"};   // names to make string creation easier
+char *sensorTemps[3][15];                              // and an array of strings for the converted temp values
+
+//**********************************buttons**************************************************
+// constants won't change. They're used here to set pin numbers:
+const int yesButtonPin = 13;   // the number of the yes pushbutton pin
+const int noButtonPin = 14;    // the number of the no pushbutton pin
 
 
-//*************************************WhatsApp*********************************************
+//*************************************WhatsApp**********************************************
 //@author Hafidh Hidayat (hafidhhidayat@hotmail.com)   https://github.com/hafidhh/Callmebot_ESP8266
 // apiKey : Follow instruction on https://www.callmebot.com/blog/free-api-whatsapp-messages/
 String phoneNumber = "+61437325596";
@@ -42,16 +44,24 @@ String apiKey = "1848095";
 String start_messsage = "Freezer Monitor has started";
 
 int counter = 0;
-char _buffer[15];
+char _buffer[45];
 char _buffer2[10];
-long timeToSeven = 86400;         // we dont know what the 
+unsigned long millisToSeven = 43200000UL;   // half a day  
+unsigned long nextStatus = 0;
+int numberOfSensors = 0;
+int buttonState = 0;      // state of button presses
 
 void setup() {
-  lcd.init();                      // initialize the lcd 
+  pinMode(yesButtonPin, INPUT_PULLUP);      // initialize the pushbutton pin as an input with pullup 
+  pinMode(noButtonPin, INPUT_PULLUP);       // initialize the pushbutton pin as an input with pullup 
+
+
+  lcd.init();                     // initialize the lcd 
   lcd.backlight();
-  lcd.begin(16, 2);                 // set up the LCD's number of columns and rows:
+  lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
   lcd.setCursor(0, 0);
   lcd.display();
+
 	Serial.begin(115200);           // serial on 115200 baud
 
 	WiFi.begin(ssid, password);
@@ -72,63 +82,125 @@ void setup() {
   Serial.print("Local port: ");
   Serial.println(udp.localPort());
 
+  millisToSeven = getTime();
+  Serial.print(millisToSeven);
+  Serial.println("milliseconds to 7 oclock");
+  nextStatus = millis() + millisToSeven;
+
   //************************************ Temp sensors ********************************
   // locate devices on the bus
-  Serial.print("Locating devices...");
+  Serial.println("Locating devices...");
   sensors.begin();
-  Serial.print("Found ");
-  Serial.print(sensors.getDeviceCount(), DEC);
-  Serial.println(" devices.");
- 
-  if (!sensors.getAddress(insideThermometer, 0)) Serial.println("Unable to find address for Device 0");
- 
-  // set the resolution to 12 bit (Each Dallas/Maxim device is capable of several different resolutions)
-  sensors.setResolution(insideThermometer, 12);
+  numberOfSensors = sensors.getDeviceCount();
+
+  lcd.setCursor(0,0);
+  if (!sensors.getAddress(deviceAddress, 0)){
+    lcd.println("Unable to find Sensor 0!");
+  } else if (numberOfSensors < 2){
+    lcd.println("Too few Sensors!");            // check for at least 2 sensors
+  } else {
+    lcd.print("Found ");
+    lcd.print(numberOfSensors);
+    lcd.println(" sensors.");
+
+
+    for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
+      if(sensors.getAddress(deviceAddress, i)){// Search the wire for address
+        Serial.print("Found device ");
+        Serial.print(i, DEC);
+        Serial.print(" with address: ");
+        for (uint8_t i = 0; i < 8; i++){
+          Serial.print("0x");
+          if (deviceAddress[i] < 0x10) Serial.print("0");
+          Serial.print(deviceAddress[i], HEX);
+          if (i < 7) Serial.print(", ");
+        }
+        
+        Serial.println();
+        Serial.print(sensorNames[i]);
+        Serial.print(" ");
+        Serial.print(sensors.getTempC(deviceAddress));
+        Serial.println("C.");
+      } else {
+        Serial.print("Found ghost device at ");
+        Serial.print(i, DEC);
+        Serial.print(" but could not detect address. Check power and cabling");
+      }
+    }
+  }
+
+  sensors.setResolution(deviceAddress, 12);// set the resolution to 12 bit
+  delay(2000);
+    
+  lcd.setCursor(0,0);   
 
   Serial.print("Device 0 Resolution: ");
-  Serial.print(sensors.getResolution(insideThermometer), DEC);
+  Serial.print(sensors.getResolution(deviceAddress), DEC);
   Serial.println();
+  sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
+
 
   //********************************** start Call Me Bot service ***************************************
 	Callmebot.begin();
 	Callmebot.whatsappMessage(phoneNumber, apiKey, start_messsage);         // Whatsapp Message
+      for(int i=0;i<numberOfSensors; i++){ 
+      dtostrf(sensors.getTempCByIndex(i), 3, 1, _buffer2); 
+      sprintf(_buffer, "%s: %sC.", sensorNames[i], _buffer2);
+      Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);	
+      delay(500);
+    }
 	Serial.println(Callmebot.debug());
 
 }
 
-void loop() {
-  getTime();
+void loop() 
+{
+ // read the state of the pushbutton value:
+  // if (digitalRead(yesButtonPin) == LOW) Serial.println("Yes Pressed"); 
+  // if (digitalRead(noButtonPin) == LOW) Serial.println("No Pressed"); 
+  sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
 
-  sensors.requestTemperatures();    // Read and print temperatures in Celsius
+  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps    
+    lcd.setCursor(0,0);
+    lcd.print(sensorNames[i]);
+    lcd.print(" ");
+    dtostrf(sensors.getTempCByIndex(i), 3, 1, _buffer2);
 
-  Serial.print("Temperature Sensor 1: ");
-  Serial.print(sensors.getTempCByIndex(0));
-  Serial.println(" °C");
+    lcd.print(_buffer2);
+    lcd.println("C    ");
+    delay(2000); 
+   }
+   
+  if (millis() > nextStatus){ 
+    for(int i=0;i<numberOfSensors; i++){ 
+      dtostrf(sensors.getTempCByIndex(i), 3, 1, _buffer2); 
+      sprintf(_buffer, "%s: %sC.", sensorNames[i], _buffer2);
+      Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);	
+      delay(500);
+    }
 
-  	delay(500);
-		Serial.print(".");
-	counter += 1;
-  if (counter%100 == 0){
-    Serial.print("fire");
-    Serial.println(counter);
-  }
-
-if (counter%120 == 0){
-  dtostrf(sensors.getTempCByIndex(0), 3, 1, _buffer2);
-  sprintf(_buffer, "Temp is %s C", _buffer2);
-  Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);
-    Serial.print("call");
-    Serial.println(counter);
-  }
-
-  
+// if (counter%120 == 0){
+//   dtostrf(sensors.getTempCByIndex(0), 3, 1, _buffer2);
+//   sprintf(_buffer, "Temp is %s C", _buffer2);
+//   Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);
+//     Serial.print("call");
+//     Serial.println(counter);
+//   }
+  millisToSeven = getTime();
+  Serial.print(millisToSeven);
+  Serial.println(" milliseconds to 7 oclock.");
+  nextStatus = millis() + millisToSeven;
+ }
 }
 
-void getTime() {
+
+
+unsigned long getTime() {
   WiFi.hostByName(ntpServerName, timeServerIP);   // get a random server from the pool
   sendNTPpacket(timeServerIP);                    // send an NTP packet to a time server
   delay(1000);                                    // wait to see if a reply is available
-
+  
+  unsigned long secondsToSeven = 0;
   int cb = udp.parsePacket();
 
   if (!cb) {
@@ -152,12 +224,28 @@ void getTime() {
     const unsigned long seventyYears = 2208988800UL;                    // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
     unsigned long epoch = secsSince1900 - seventyYears;                 // subtract seventy years:
     Serial.println(epoch);                                              // print Unix time:
-    Serial.print("Timezone is +9.5 hours");
+    Serial.print("Timezone is +9.5 hours.");
     epoch += 9.5 * 3600;
+
+lcd.setCursor(0, 0);
+    Serial.print(". Day of week ");
+    Serial.print(((epoch/86400) + 4)%7);
+    Serial.print(". ");
+    unsigned long dailySeconds = epoch % 86400;
+ 
+
+    if (dailySeconds < 25200) {
+      secondsToSeven = 25200 - dailySeconds;
+    } else if (dailySeconds < 68400){
+      secondsToSeven = 68400 - dailySeconds; 
+    } else {
+      secondsToSeven = 86400 - dailySeconds + 25200;
+    }
+    Serial.print("Seconds to Seven = ");
+    Serial.println(secondsToSeven);
     
-  lcd.setCursor(0, 0);
     // print the hour, minute and second:
-    Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
+    Serial.print(". The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
     Serial.print((epoch % 86400L) / 3600);  // print the hour (86400 equals secs per day)
     lcd.print((epoch % 86400L) / 3600);  // print the hour (86400 equals secs per day)
     Serial.print(':');
@@ -179,6 +267,7 @@ void getTime() {
   }
 
   delay(10000);                             // wait ten seconds before asking for the time again
+  return secondsToSeven * 1000;
 }
 
 // send an NTP request to the time server at the given address
