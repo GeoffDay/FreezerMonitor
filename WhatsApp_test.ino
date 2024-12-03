@@ -1,6 +1,7 @@
-//WhatsApp_test.ino  This code sends messages using the whatsapp on my mobile phone. 
-// the plan is to send a general freezer temp at 7 oclock morning and night and an 
-// alarm if the temp exceeds zero.
+// WhatsApp_test.ino  This code sends messages using the whatsapp on my mobile phone. The 
+// plan is to send a general freezer temp at 7 oclock morning and night and an alarm if 
+// the temp exceeds zero. Need to make the system able to restart without user intevention
+// so temp sensors need to be disconnected or switched of at startup. 
 #include <LiquidCrystal_I2C.h>
 #include <ESP8266WiFi.h>                    // wifi 
 #include <WiFiUdp.h>                        // ntp time uses this
@@ -13,6 +14,7 @@ LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars
 
 const char* ssid = "Telstra55B601";
 const char* password = "6xcrs24vng";
+
 
 //*********************************Time server***********************************************
 unsigned int localPort = 2390;        // local port to listen for UDP packets
@@ -27,21 +29,16 @@ WiFiUDP udp;                          // A UDP instance to let us send and recei
 OneWire oneWire(ONE_WIRE_BUS);        // Setup a oneWire instance to communicate with any OneWire device
 DallasTemperature sensors(&oneWire);  // Pass oneWire reference to DallasTemperature library
 DeviceAddress deviceAddress;          // arrays to hold device address
-const char *sensorNames[3] = {"Fridge 1", "Fridge 2", "Coolroom"};   // names to make string creation easier
-char *sensorTemps[3][15];                              // and an array of strings for the converted temp values
-
-//**********************************buttons**************************************************
-// constants won't change. They're used here to set pin numbers:
-const int yesButtonPin = 13;   // the number of the yes pushbutton pin
-const int noButtonPin = 14;    // the number of the no pushbutton pin
-
+const char *sensorNames[3] = {"Freezer1", "Freezer2", "Coolroom"};   // names to make string creation easier
+const char *shortSensorNames[3] = {"Frzr1", "Frzr2", "Clrm"};   // names to make string creation easier
+char sensorTemps[3][6];               // and an array of strings for the converted temp values
 
 //*************************************WhatsApp**********************************************
 //@author Hafidh Hidayat (hafidhhidayat@hotmail.com)   https://github.com/hafidhh/Callmebot_ESP8266
 // apiKey : Follow instruction on https://www.callmebot.com/blog/free-api-whatsapp-messages/
 String phoneNumber = "+61437325596";
 String apiKey = "1848095";
-String start_messsage = "Freezer Monitor has started";
+char cmbMessage[60] = "";
 
 int counter = 0;
 char _buffer[45];
@@ -49,24 +46,18 @@ char _buffer2[10];
 unsigned long millisToSeven = 43200000UL;   // half a day  
 unsigned long nextStatus = 0;
 int numberOfSensors = 0;
-int buttonState = 0;      // state of button presses
+
 
 void setup() {
-  pinMode(yesButtonPin, INPUT_PULLUP);      // initialize the pushbutton pin as an input with pullup 
-  pinMode(noButtonPin, INPUT_PULLUP);       // initialize the pushbutton pin as an input with pullup 
-
-
   lcd.init();                     // initialize the lcd 
   lcd.backlight();
   lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
-  lcd.setCursor(0, 0);
   lcd.display();
 
 	Serial.begin(115200);           // serial on 115200 baud
 
 	WiFi.begin(ssid, password);
 	Serial.println("Connecting");
-  lcd.println("Connected          ");
 	while(WiFi.status() != WL_CONNECTED) {
 		delay(500);
 		Serial.print(".");
@@ -75,9 +66,12 @@ void setup() {
 	Serial.println("");
 	Serial.print("Connected to WiFi network with IP Address: ");
 	Serial.println(WiFi.localIP());
-  
+  sprintf(_buffer, "%s", ssid);
+  displayOnLCD("Connected", _buffer, 2000);
+
   //************************************* Time ***************************************
   Serial.println("Starting UDP");
+  displayOnLCD(0,"Getting NTP time", 1000);
   udp.begin(localPort);
   Serial.print("Local port: ");
   Serial.println(udp.localPort());
@@ -95,27 +89,17 @@ void setup() {
 
   lcd.setCursor(0,0);
   if (!sensors.getAddress(deviceAddress, 0)){
-    lcd.println("Unable to find Sensor 0!");
-  } else if (numberOfSensors < 2){
-    lcd.println("Too few Sensors!");            // check for at least 2 sensors
+    displayOnLCD(0,"Cant find Sensors!", 2000);
   } else {
-    lcd.print("Found ");
-    lcd.print(numberOfSensors);
-    lcd.println(" sensors.");
+    sprintf(_buffer, "%s %d %s", "Found", numberOfSensors, "Sensors.");
+    displayOnLCD(0, _buffer, 2000);
 
 
     for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
       if(sensors.getAddress(deviceAddress, i)){// Search the wire for address
         Serial.print("Found device ");
         Serial.print(i, DEC);
-        Serial.print(" with address: ");
-        for (uint8_t i = 0; i < 8; i++){
-          Serial.print("0x");
-          if (deviceAddress[i] < 0x10) Serial.print("0");
-          Serial.print(deviceAddress[i], HEX);
-          if (i < 7) Serial.print(", ");
-        }
-        
+         
         Serial.println();
         Serial.print(sensorNames[i]);
         Serial.print(" ");
@@ -124,8 +108,11 @@ void setup() {
       } else {
         Serial.print("Found ghost device at ");
         Serial.print(i, DEC);
-        Serial.print(" but could not detect address. Check power and cabling");
+        Serial.print("but could not detect address. Check power and cabling");
       }
+
+
+      delay(1000);
     }
   }
 
@@ -141,51 +128,44 @@ void setup() {
 
 
   //********************************** start Call Me Bot service ***************************************
-	Callmebot.begin();
-	Callmebot.whatsappMessage(phoneNumber, apiKey, start_messsage);         // Whatsapp Message
-      for(int i=0;i<numberOfSensors; i++){ 
-      dtostrf(sensors.getTempCByIndex(i), 3, 1, _buffer2); 
-      sprintf(_buffer, "%s: %sC.", sensorNames[i], _buffer2);
-      Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);	
-      delay(500);
-    }
-	Serial.println(Callmebot.debug());
+  displayOnLCD("Setting up", "WhatsApp service", 2000);
+  lcd.clear();
 
+  Callmebot.begin();
+  strcpy(cmbMessage, "Startup.");
+  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
+    dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
+    sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
+    strcat(cmbMessage, _buffer);
+  }
+
+  strcat(cmbMessage, ".");
+  Serial.println(cmbMessage);
+
+  Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);	
+	displayOnLCD(0, Callmebot.debug(), 2000);
 }
 
 void loop() 
 {
- // read the state of the pushbutton value:
-  // if (digitalRead(yesButtonPin) == LOW) Serial.println("Yes Pressed"); 
-  // if (digitalRead(noButtonPin) == LOW) Serial.println("No Pressed"); 
   sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
 
-  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps    
-    lcd.setCursor(0,0);
-    lcd.print(sensorNames[i]);
-    lcd.print(" ");
-    dtostrf(sensors.getTempCByIndex(i), 3, 1, _buffer2);
-
-    lcd.print(_buffer2);
-    lcd.println("C    ");
-    delay(2000); 
+  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps   
+    dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
+    sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]); 
+    displayOnLCD(0, _buffer, 2000);
    }
    
   if (millis() > nextStatus){ 
-    for(int i=0;i<numberOfSensors; i++){ 
-      dtostrf(sensors.getTempCByIndex(i), 3, 1, _buffer2); 
-      sprintf(_buffer, "%s: %sC.", sensorNames[i], _buffer2);
-      Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);	
-      delay(500);
+    strcpy(cmbMessage, "");
+
+    for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
+      dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
+      sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
+      strcat(cmbMessage, _buffer);
+      Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
     }
 
-// if (counter%120 == 0){
-//   dtostrf(sensors.getTempCByIndex(0), 3, 1, _buffer2);
-//   sprintf(_buffer, "Temp is %s C", _buffer2);
-//   Callmebot.whatsappMessage(phoneNumber, apiKey, _buffer);
-//     Serial.print("call");
-//     Serial.println(counter);
-//   }
   millisToSeven = getTime();
   Serial.print(millisToSeven);
   Serial.println(" milliseconds to 7 oclock.");
@@ -228,6 +208,8 @@ unsigned long getTime() {
     epoch += 9.5 * 3600;
 
 lcd.setCursor(0, 0);
+lcd.clear();
+    // sprintf(_buffer, "")
     Serial.print(". Day of week ");
     Serial.print(((epoch/86400) + 4)%7);
     Serial.print(". ");
@@ -263,11 +245,29 @@ lcd.setCursor(0, 0);
       lcd.print('0');                    // In the first 10 seconds of each minute, we'll want a leading '0'
     }
     Serial.println(epoch % 60);             // print the second
-    lcd.println(epoch % 60);             // print the second
+    lcd.print(epoch % 60);             // print the second
   }
 
   delay(10000);                             // wait ten seconds before asking for the time again
   return secondsToSeven * 1000;
+}
+
+void displayOnLCD(int row, String charArray, int dDelay)
+{
+  lcd.clear();
+  lcd.setCursor(0, row); 
+  lcd.print(charArray);
+  delay(dDelay);
+}
+
+void displayOnLCD(String charArray, String char_Array, int dDelay)
+{
+  lcd.clear();
+  lcd.setCursor(0, 0); 
+  lcd.print(charArray);
+  lcd.setCursor(0, 1); 
+  lcd.print(char_Array);
+  delay(dDelay);
 }
 
 // send an NTP request to the time server at the given address
