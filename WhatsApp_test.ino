@@ -12,8 +12,8 @@
 // initialize the library by associating any needed LCD interface pins with the arduino pin number it is connected to
 LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-const char* ssid = "Telstra55B601";
-const char* password = "6xcrs24vng";
+const char* ssid = "Airport";       //"Telstra55B601";
+const char* password = "Hol_0406";  //"6xcrs24vng";
 
 
 //*********************************Time server***********************************************
@@ -23,6 +23,7 @@ const char* ntpServerName = "time.nist.gov";
 const int NTP_PACKET_SIZE = 48;       // NTP time stamp is in the first 48 bytes of the message
 byte packetBuffer[NTP_PACKET_SIZE];   // buffer to hold incoming and outgoing packets
 WiFiUDP udp;                          // A UDP instance to let us send and receive packets over UDP
+long alarmGap = 0;                    // how lomg we wait between alarms
 
 //********************************Dallas OneWire*********************************************
 #define ONE_WIRE_BUS 12               // Data wire is connected to GPIO12 on pin 6
@@ -150,10 +151,29 @@ void loop()
 {
   sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
 
-  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps   
-    dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
-    sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]); 
-    displayOnLCD(0, _buffer, 2000);
+  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps 
+    float thisTemp = sensors.getTempCByIndex(i);
+    char *alarmTxt;
+    
+    dtostrf(thisTemp, 3, 1, sensorTemps[i]);    // convert float to a string 
+    sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]);  // create the string
+    
+    if (thisTemp > 0.0) {
+      alarmTxt = "OverTemp"; 
+      strcpy(cmbMessage, "OverTemp!!! "); // alarm message
+
+      if (alarmGap-- == 0) {
+        strcat(cmbMessage, _buffer);
+        Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
+        alarmGap = 300;           // with the 2 second delay this gives 10 mins between alarm messages
+      }
+
+    } else {
+      alarmTxt = " ";             // no alarm
+      alarmGap = 0;
+    }
+
+    displayOnLCD(_buffer, alarmTxt, 2000);      // display on LCD
    }
    
   if (millis() > nextStatus){ 
@@ -163,9 +183,9 @@ void loop()
       dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
       sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
       strcat(cmbMessage, _buffer);
-      Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
     }
 
+  Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
   millisToSeven = getTime();
   Serial.print(millisToSeven);
   Serial.println(" milliseconds to 7 oclock.");
