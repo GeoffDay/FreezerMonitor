@@ -12,8 +12,8 @@
 // initialize the library by associating any needed LCD interface pins with the arduino pin number it is connected to
 LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-const char* ssid = "Airport";       //"Telstra55B601";
-const char* password = "Hol_0406";  //"6xcrs24vng";
+const char* ssid = "Telstra55B601";//"Airport"; 
+const char* password =  "6xcrs24vng";//"Hol_0406"; 
 
 
 //*********************************Time server***********************************************
@@ -42,8 +42,8 @@ String apiKey = "1848095";
 char cmbMessage[60] = "";
 
 int counter = 0;
-char _buffer[45];
-char _buffer2[10];
+char _buffer[20];
+char _buffer2[20];
 unsigned long millisToSeven = 43200000UL;   // half a day  
 unsigned long nextStatus = 0;
 int numberOfSensors = 0;
@@ -54,66 +54,63 @@ void setup() {
   lcd.backlight();
   lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
   lcd.display();
+  displayOnLCD("Hi. loading code", "Ver 181224", 2000);
 
 	Serial.begin(115200);           // serial on 115200 baud
 
 	WiFi.begin(ssid, password);
-	Serial.println("Connecting");
+  displayOnLCD(0, "Connecting", 2000);
+
 	while(WiFi.status() != WL_CONNECTED) {
 		delay(500);
-		Serial.print(".");
+		lcd.print(".");
 	}
 
-	Serial.println("");
-	Serial.print("Connected to WiFi network with IP Address: ");
-	Serial.println(WiFi.localIP());
   sprintf(_buffer, "%s", ssid);
   displayOnLCD("Connected", _buffer, 2000);
 
   //************************************* Time ***************************************
-  Serial.println("Starting UDP");
-  displayOnLCD(0,"Getting NTP time", 1000);
+  displayOnLCD("Starting UDP", "Getting NTP time", 1000);
   udp.begin(localPort);
-  Serial.print("Local port: ");
-  Serial.println(udp.localPort());
+  // Serial.print("Local port: ");
+  // Serial.println(udp.localPort());
 
   millisToSeven = getTime();
-  Serial.print(millisToSeven);
-  Serial.println("milliseconds to 7 oclock");
+  sprintf(_buffer, "%ld ms", millisToSeven);
+  displayOnLCD(_buffer, "to 7 oclock", 5000);
+ //Serial.println("Got here");
   nextStatus = millis() + millisToSeven;
 
   //************************************ Temp sensors ********************************
-  // locate devices on the bus
-  Serial.println("Locating devices...");
-  sensors.begin();
+  sensors.begin();        // locate devices on the bus
   numberOfSensors = sensors.getDeviceCount();
 
-  lcd.setCursor(0,0);
   if (!sensors.getAddress(deviceAddress, 0)){
     displayOnLCD(0,"Cant find Sensors!", 2000);
   } else {
     sprintf(_buffer, "%s %d %s", "Found", numberOfSensors, "Sensors.");
     displayOnLCD(0, _buffer, 2000);
 
-
     for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
       if(sensors.getAddress(deviceAddress, i)){// Search the wire for address
-        Serial.print("Found device ");
-        Serial.print(i, DEC);
-         
-        Serial.println();
-        Serial.print(sensorNames[i]);
-        Serial.print(" ");
-        Serial.print(sensors.getTempC(deviceAddress));
-        Serial.println("C.");
+        sprintf(_buffer, "found sensor %d", i);
+        dtostrf(sensors.getTempC(deviceAddress), 3, 1, sensorTemps[i]); 
+        sprintf(_buffer2, "%s: %sC", sensorNames[i], sensorTemps[i]);
+        displayOnLCD(_buffer, _buffer2, 2000);
+
+        // Serial.print(" at ");
+        // Serial.print(i);
+        // Serial.print(" ");
+        // for (uint8_t i = 3; i > 0; i--){
+        //  // Serial.print("0x");
+        //   if (deviceAddress[i] < 0x10) Serial.print("0");
+        //   Serial.print(deviceAddress[i], HEX);
+        //   //if (i < 7) Serial.print(", ");
+        // }
       } else {
-        Serial.print("Found ghost device at ");
-        Serial.print(i, DEC);
-        Serial.print("but could not detect address. Check power and cabling");
+        sprintf(_buffer, "ghost device at %d", i);
+        displayOnLCD(_buffer, "couldn't get add", 2000);
       }
-
-
-      delay(1000);
     }
   }
 
@@ -141,8 +138,7 @@ void setup() {
   }
 
   strcat(cmbMessage, ".");
-  Serial.println(cmbMessage);
-
+ 
   Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);	
 	displayOnLCD(0, Callmebot.debug(), 2000);
 }
@@ -162,7 +158,7 @@ void loop()
       alarmTxt = "OverTemp"; 
       strcpy(cmbMessage, "OverTemp!!! "); // alarm message
 
-      if (alarmGap-- == 0) {
+      if (alarmGap-- < 1) {
         strcat(cmbMessage, _buffer);
         Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
         alarmGap = 300;           // with the 2 second delay this gives 10 mins between alarm messages
@@ -173,7 +169,10 @@ void loop()
       alarmGap = 0;
     }
 
-    displayOnLCD(_buffer, alarmTxt, 2000);      // display on LCD
+    displayOnLCD(_buffer, alarmTxt, 1000);      // display on LCD
+    lcd.noBacklight();
+    displayOnLCD(_buffer, alarmTxt, 1000);      // display on LCD
+    lcd.backlight();
    }
    
   if (millis() > nextStatus){ 
@@ -204,9 +203,9 @@ unsigned long getTime() {
   int cb = udp.parsePacket();
 
   if (!cb) {
-    Serial.println("no packet yet");
+    displayOnLCD(0, "no packet yet", 1000);
   } else {
-    Serial.print("packet received, length=");
+    displayOnLCD(0, "packet received", 1000);
     Serial.println(cb);
   
     udp.read(packetBuffer, NTP_PACKET_SIZE);                            // We've received a packet, read the data into the buffer
@@ -219,23 +218,20 @@ unsigned long getTime() {
     Serial.print("Seconds since Jan 1 1900 = ");
     Serial.println(secsSince1900);
 
-    
-    Serial.print("Unix time = ");           	                          // now convert NTP time into everyday time:
+    // now convert NTP time into everyday time:
     const unsigned long seventyYears = 2208988800UL;                    // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
     unsigned long epoch = secsSince1900 - seventyYears;                 // subtract seventy years:
-    Serial.println(epoch);                                              // print Unix time:
-    Serial.print("Timezone is +9.5 hours.");
-    epoch += 9.5 * 3600;
+        
+    sprintf(_buffer, "Unix: %ld", epoch);       // print Unix time:
+    sprintf(_buffer2, "Timezone +9.5 hrs.");  // show timezone
+    displayOnLCD(_buffer, _buffer2, 2000);
+    epoch += 9.5 * 3600;                        // adjust for timezone
 
-lcd.setCursor(0, 0);
-lcd.clear();
-    // sprintf(_buffer, "")
-    Serial.print(". Day of week ");
-    Serial.print(((epoch/86400) + 4)%7);
-    Serial.print(". ");
+    sprintf(_buffer, "Day of week %ld.", ((epoch/86400) + 4)%7);
+    displayOnLCD(0, _buffer, 2000);
+
     unsigned long dailySeconds = epoch % 86400;
  
-
     if (dailySeconds < 25200) {
       secondsToSeven = 25200 - dailySeconds;
     } else if (dailySeconds < 68400){
@@ -243,34 +239,25 @@ lcd.clear();
     } else {
       secondsToSeven = 86400 - dailySeconds + 25200;
     }
-    Serial.print("Seconds to Seven = ");
-    Serial.println(secondsToSeven);
-    
+   
     // print the hour, minute and second:
-    Serial.print(". The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
-    Serial.print((epoch % 86400L) / 3600);  // print the hour (86400 equals secs per day)
-    lcd.print((epoch % 86400L) / 3600);  // print the hour (86400 equals secs per day)
-    Serial.print(':');
-    lcd.print(':');
-    if (((epoch % 3600) / 60) < 10) {
-      Serial.print('0');                    // In the first 10 minutes of each hour, we'll want a leading '0'
-      lcd.print('0');                    // In the first 10 minutes of each hour, we'll want a leading '0'
-    }
-    Serial.print((epoch % 3600) / 60);      // print the minute (3600 equals secs per minute)
-    lcd.print((epoch % 3600) / 60);      // print the minute (3600 equals secs per minute)
-    Serial.print(':');
-    lcd.print(':');
-    if ((epoch % 60) < 10) {
-      Serial.print('0');                    // In the first 10 seconds of each minute, we'll want a leading '0'
-      lcd.print('0');                    // In the first 10 seconds of each minute, we'll want a leading '0'
-    }
-    Serial.println(epoch % 60);             // print the second
-    lcd.print(epoch % 60);             // print the second
-  }
+    sprintf(_buffer, "%ld:", (epoch % 86400L) / 3600);    // print the hour (86400 equals secs per day)
 
-  delay(10000);                             // wait ten seconds before asking for the time again
+    if (((epoch % 3600) / 60) < 10) strcat(_buffer, "0"); // In the first 10 minutes of each hour, we'll want a leading '0'
+    
+    sprintf(_buffer2, "%ld:", (epoch % 3600) / 60);       // print the minute (3600 equals secs per minute)
+    strcat(_buffer, _buffer2);                            // join the strings into _buffer
+
+    if ((epoch % 60) < 10) strcat(_buffer, "0");          // In the first 10 seconds of each minute, we'll want a leading '0'
+ 
+    sprintf(_buffer2, "%ld",epoch % 60);                  // print the second
+    strcat(_buffer, _buffer2);                            // join the strings into _buffer
+
+    displayOnLCD(0, _buffer, 2000);
+  }
   return secondsToSeven * 1000;
 }
+
 
 void displayOnLCD(int row, String charArray, int dDelay)
 {
@@ -279,6 +266,7 @@ void displayOnLCD(int row, String charArray, int dDelay)
   lcd.print(charArray);
   delay(dDelay);
 }
+
 
 void displayOnLCD(String charArray, String char_Array, int dDelay)
 {
@@ -289,6 +277,7 @@ void displayOnLCD(String charArray, String char_Array, int dDelay)
   lcd.print(char_Array);
   delay(dDelay);
 }
+
 
 // send an NTP request to the time server at the given address
 void sendNTPpacket(IPAddress& address) {
