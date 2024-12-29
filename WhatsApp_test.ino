@@ -26,7 +26,6 @@ const char* ntpServerName = "time.nist.gov";
 const int NTP_PACKET_SIZE = 48;       // NTP time stamp is in the first 48 bytes of the message
 byte packetBuffer[NTP_PACKET_SIZE];   // buffer to hold incoming and outgoing packets
 WiFiUDP udp;                          // A UDP instance to let us send and receive packets over UDP
-long alarmGap = 0;                    // how lomg we wait between alarms
 
 //********************************Dallas OneWire*********************************************
 #define ONE_WIRE_BUS 12               // Data wire is connected to GPIO12 on pin 6
@@ -38,7 +37,12 @@ const char *shortSensorNames[3] = {"Frzr1", "Frzr2", "Clrm"};   // names to make
 char sensorTemps[3][6];               // and an array of strings for the converted temp values
 float oldSensorTemps[3];              // keep a copy of the hour ago temp 
 float sensorDeltas[3];                // and work out how much it has changed
+
+bool overTempAlarm = false;           // set this true if any of the sensors go overtemp
+bool risingTempAlarm = false;         // set this true if the rate of rise is too high.
 int loopCounter = 0;                  // count how many times we go through the loop
+long alarmGap = 0;                    // how lomg we wait between alarms
+char alarmTxt[17] = "";
 
 //*************************************WhatsApp**********************************************
 //@author Hafidh Hidayat (hafidhhidayat@hotmail.com)   https://github.com/hafidhh/Callmebot_ESP8266
@@ -127,7 +131,7 @@ void setup() {
   // lcd.clear();
 
   Callmebot.begin();
-  strcpy(cmbMessage, "Startup.");
+  strcpy(cmbMessage, "Start.");
   for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
     float thisTemp = sensors.getTempCByIndex(i);
     dtostrf(thisTemp, 3, 1, sensorTemps[i]); 
@@ -144,56 +148,62 @@ void setup() {
 
 
 
-void loop() 
-{
-  loopCounter++;                    // keep count of the number of times through the loop
-  sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
+void loop() {
+  loopCounter++;                              // keep count of the number of times through the loop
+  sensors.requestTemperatures();              // Request all on the bus to perform a temp conversion
 
-  for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps 
-    float thisTemp = sensors.getTempCByIndex(i);
-    char alarmTxt[16] = "";
+  overTempAlarm = false;                      // reset each time through the loop 
+  risingTempAlarm = false;
+  strcpy(alarmTxt, "");                       // set this to null too.
+
+  for(int i=0;i<numberOfSensors; i++) {       // Loop through each temp sensor 
+    float thisTemp = sensors.getTempCByIndex(i);// get the flaot value
     
-    dtostrf(thisTemp, 3, 1, sensorTemps[i]);    // convert float to a string into sensorTemps 
+    dtostrf(thisTemp, 3, 1, sensorTemps[i]);  // convert float to a string -> sensorTemps 
     sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
-    
-    if (thisTemp > 0.0) {                 // we're Melting Now!!!!
-      strcpy(alarmTxt, "OverTemp!"); 
-      strcpy(cmbMessage, "OverTemp!!! "); // alarm message
 
-      if (alarmGap-- < 1) {
-        strcat(cmbMessage, _buffer);      // combine message strings
-        Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
-        alarmGap = 300;           // with the 2 second delay this gives 10 mins between alarm messages
-      }
-    } else if ((thisTemp - oldSensorTemps[i]) > 1.0) {  // how much have temps changed in the last hour?
-      strcpy(alarmTxt, "Temp rising fast!");
-      strcpy(cmbMessage, "Temp rising fast!!! ");     // alarm message
+    if (thisTemp > 0.0) {                     // this should be lower and may need to be different for the different freezers
+      overTempAlarm = true;                   // set the over temp flag
+      strcpy(alarmTxt, "OverTemp! ");         // we're Melting Now!!!!
+    } 
 
-      if (alarmGap-- < 1) {
-        strcat(cmbMessage, _buffer);                  // combine message strings
-        Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
-        alarmGap = 300;           // with the 2 second delay this gives 10 mins between alarm messages
-      }
-    } else {
-      strcpy(alarmTxt, " ");             // no alarm
-      alarmGap = 0;
+    if ((thisTemp - oldSensorTemps[i]) > 1.0) {
+      risingTempAlarm = true;                 // or the rising temp flag
+      strcpy(alarmTxt, "Rising Temp! ");      // alarm message
     }
 
-    if (loopCounter > 1800) {
-      oldSensorTemps[i] = thisTemp;             // this is 1 hour so record the sensor temps
-      loopCounter = 0;                          // set loop counter back to zero
-    }
+    displayOnLCD(_buffer, alarmTxt, 2000);    // display on LCD
 
-    displayOnLCD(_buffer, alarmTxt, 1000);      // display on LCD
-    lcd.noBacklight();                          // flash the LCD backlight to draw attention
-    displayOnLCD(_buffer, alarmTxt, 1000);      // display on LCD
-    lcd.backlight();                            // make sure you finish with the backlight on.
+    if (loopCounter > 1800) oldSensorTemps[i] = thisTemp; // record the sensor temps each hour so we can calc change
   }
+
+  if ((overTempAlarm) || (risingTempAlarm)) { // we have an alarm so create a message
+    strcpy(cmbMessage, alarmTxt);             // stick the alarm message into the CallMeBot message
+
+    if (alarmGap % 2 == 0) lcd.backlight();   // make sure you finish with the backlight on.
+    if (alarmGap % 2 == 1) lcd.noBacklight(); // make sure you finish with the backlight on.
+
+    for(int i=0;i<numberOfSensors; i++) {     // Loop through each temp sensor 
+      sprintf(_buffer, "%s: %sC ", shortSensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
+      strcat(cmbMessage, _buffer);            // and append it to the CallMeBot message
+    }
+
+    if (alarmGap-- < 1) {
+      Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
+      alarmGap = 300 / numberOfSensors;       // with the 2 second delay this gives 10 mins between alarm messages
+    }
+  } else {
+      alarmGap = 0;                           // if no alarms set gap to zero
+      lcd.backlight();                        // make sure you finish with the backlight on.
+  }
+                
+  if (loopCounter > 1800) loopCounter = 0;    // set loop counter back to zero
+  
    
   if (millis() > nextStatus){ 
     strcpy(cmbMessage, "");
 
-    for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
+    for(int i=0;i<numberOfSensors; i++){      // Loop through each device, print out address      
       dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
       sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
       strcat(cmbMessage, _buffer);
