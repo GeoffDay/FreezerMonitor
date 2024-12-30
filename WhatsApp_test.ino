@@ -3,10 +3,13 @@
 // the temp exceeds zero. Need to make the system able to restart without user intevention
 // so temp sensors need to be disconnected or switched of at startup. 
 // also sends an alarm if temp of any sensor exceeds zero or if the temp changes more than 
-// 1.0 degrees in an hour 28 Dec 2024.
+// 1.0 degrees in an hour 28 Dec 2024. 
+// May be better to find out what the minimum temps are and give a couple of warnings when 
+// various thresholds are reached. 29 Dec 2024. 
 
 #include <LiquidCrystal_I2C.h>
-#include <ESP8266WiFi.h>                    // wifi 
+// #include <ESP8266WiFi.h>                 // wifi
+#include <ESP8266WiFiMulti.h>               // setup for both networks
 #include <WiFiUdp.h>                        // ntp time uses this
 #include <OneWire.h>                        // Temp Sensor 
 #include <DallasTemperature.h>              // libraries
@@ -15,9 +18,8 @@
 // initialize the library by associating any needed LCD interface pins with the arduino pin number it is connected to
 LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
 
-const char* ssid = "Telstra55B601";//"Airport"; 
-const char* password =  "6xcrs24vng";//"Hol_0406"; 
-
+ESP8266WiFiMulti wifiMulti;
+const uint32_t connectTimeoutMs = 5000;      // WiFi connect timeout per AP. Increase when connecting takes longer.
 
 //*********************************Time server***********************************************
 unsigned int localPort = 2390;        // local port to listen for UDP packets
@@ -32,11 +34,13 @@ WiFiUDP udp;                          // A UDP instance to let us send and recei
 OneWire oneWire(ONE_WIRE_BUS);        // Setup a oneWire instance to communicate with any OneWire device
 DallasTemperature sensors(&oneWire);  // Pass oneWire reference to DallasTemperature library
 DeviceAddress deviceAddress;          // arrays to hold device address
+
+int numberOfSensors = 0;              // there will be two freezers and possibly a cool room for some events. 
 const char *sensorNames[3] = {"Freezer1", "Freezer2", "Coolroom"};   // names to make string creation easier
 const char *shortSensorNames[3] = {"Frzr1", "Frzr2", "Clrm"};   // names to make string creation shorter
 char sensorTemps[3][6];               // and an array of strings for the converted temp values
-float oldSensorTemps[3];              // keep a copy of the hour ago temp 
-float sensorDeltas[3];                // and work out how much it has changed
+float sensorMinimums[3];              // and minimum values so that we can set 
+float sensorThresholds[3];            // different threshold for the different freezers and cool room.
 
 bool overTempAlarm = false;           // set this true if any of the sensors go overtemp
 bool risingTempAlarm = false;         // set this true if the rate of rise is too high.
@@ -56,7 +60,6 @@ char _buffer[20];
 char _buffer2[20];
 unsigned long millisToSeven = 43200000UL;   // half a day  
 unsigned long nextStatus = 0;
-int numberOfSensors = 0;
 
 
 void setup() {
@@ -64,19 +67,27 @@ void setup() {
   lcd.backlight();
   lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
   lcd.display();
-  displayOnLCD("Hi. loading code", "Ver 281224", 2000);
+  displayOnLCD("Hi. loading code", "Ver 241230", 2000);
 
 	Serial.begin(115200);           // serial on 115200 baud
 
-	WiFi.begin(ssid, password);
+  WiFi.mode(WIFI_STA);            // Set in station mode
+
+  // Register multi WiFi networks
+  wifiMulti.addAP("Telstra55B601", "6xcrs24vng");
+  wifiMulti.addAP("Airport", "Hol_0406");
+  wifiMulti.addAP("realme 5", "evaevaeva");
+
   displayOnLCD(0, "Connecting", 2000);
 
-	while(WiFi.status() != WL_CONNECTED) {
+	while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED) {
 		delay(500);
 		lcd.print(".");
 	}
+  
 
-  sprintf(_buffer, "%s", ssid);
+  Serial.print(WiFi.SSID());
+  sprintf(_buffer, "%s", WiFi.SSID().c_str());
   displayOnLCD("Connected", _buffer, 2000);
 
   //************************************* Time ***************************************
@@ -134,16 +145,16 @@ void setup() {
   strcpy(cmbMessage, "Start.");
   for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
     float thisTemp = sensors.getTempCByIndex(i);
-    dtostrf(thisTemp, 3, 1, sensorTemps[i]); 
-    sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
-    strcat(cmbMessage, _buffer);
-    oldSensorTemps[i] = thisTemp;               // save the current temps the first time through
+    dtostrf(thisTemp, 3, 1, sensorTemps[i]);    // convert to a char array -> sensortemps  
+    sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]); // create char array of names and temps
+    strcat(cmbMessage, _buffer);                // append that to the cmb message
+    sensorMinimums[i] = thisTemp;               // save the current temps as the minimum first time through
   }
 
-  strcat(cmbMessage, ".");
+  strcat(cmbMessage, ".");                      // add a full stop
  
-  Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);	
-	displayOnLCD(0, Callmebot.debug(), 2000);
+  Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);	 // and send the message
+	displayOnLCD(0, Callmebot.debug(), 2000);     // display the response
 }
 
 
@@ -162,26 +173,26 @@ void loop() {
     dtostrf(thisTemp, 3, 1, sensorTemps[i]);  // convert float to a string -> sensorTemps 
     sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
 
-    if (thisTemp > 0.0) {                     // this should be lower and may need to be different for the different freezers
+    if (thisTemp > (sensorMinimums[i] / 4)) {                     // this should be lower and may need to be different for the different freezers
       overTempAlarm = true;                   // set the over temp flag
       strcpy(alarmTxt, "OverTemp! ");         // we're Melting Now!!!!
-    } 
-
-    if ((thisTemp - oldSensorTemps[i]) > 1.0) {
+    } else if (thisTemp > (sensorMinimums[i] / 2)) {
       risingTempAlarm = true;                 // or the rising temp flag
       strcpy(alarmTxt, "Rising Temp! ");      // alarm message
     }
 
-    displayOnLCD(_buffer, alarmTxt, 2000);    // display on LCD
+    displayOnLCD(_buffer, alarmTxt, 1000);    // display on LCD
 
-    if (loopCounter > 1800) oldSensorTemps[i] = thisTemp; // record the sensor temps each hour so we can calc change
+    if (thisTemp < sensorMinimums[i]) {
+      sensorMinimums[i] = thisTemp; // record the minimums
+    }
   }
 
   if ((overTempAlarm) || (risingTempAlarm)) { // we have an alarm so create a message
     strcpy(cmbMessage, alarmTxt);             // stick the alarm message into the CallMeBot message
 
-    if (alarmGap % 2 == 0) lcd.backlight();   // make sure you finish with the backlight on.
-    if (alarmGap % 2 == 1) lcd.noBacklight(); // make sure you finish with the backlight on.
+    if (alarmGap % 2 == 0) lcd.backlight();   // backlight on.
+    if (alarmGap % 2 == 1) lcd.noBacklight(); // backlight off.
 
     for(int i=0;i<numberOfSensors; i++) {     // Loop through each temp sensor 
       sprintf(_buffer, "%s: %sC ", shortSensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
@@ -190,28 +201,32 @@ void loop() {
 
     if (alarmGap-- < 1) {
       Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
-      alarmGap = 300 / numberOfSensors;       // with the 2 second delay this gives 10 mins between alarm messages
+      alarmGap = 600 / numberOfSensors;       // with the 2 second delay this gives 10 mins between alarm messages
     }
   } else {
       alarmGap = 0;                           // if no alarms set gap to zero
       lcd.backlight();                        // make sure you finish with the backlight on.
   }
-                
-  if (loopCounter > 1800) loopCounter = 0;    // set loop counter back to zero
-  
+     
    
   if (millis() > nextStatus){ 
-    strcpy(cmbMessage, "");
+    strcpy(cmbMessage, "Current: ");
 
-    for(int i=0;i<numberOfSensors; i++){      // Loop through each device, print out address      
-      dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]); 
+    for(int i=0;i<numberOfSensors; i++){      // Loop through each device     
+      dtostrf(sensors.getTempCByIndex(i), 3, 1, sensorTemps[i]);  // convert to char array 
+      sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);  // combine with names
+      strcat(cmbMessage, _buffer);  // append
+    }
+    strcat(cmbMessage, "Mins: ");
+    for(int i=0;i<numberOfSensors; i++){      // Loop through each device     
+      dtostrf(sensorMinimums[i], 3, 1, sensorTemps[i]); 
       sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
       strcat(cmbMessage, _buffer);
     }
 
     Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
     millisToSeven = getTime();
-    Serial.print(millisToSeven);
+    Serial.print(millisToSeven);                      
     Serial.println(" milliseconds to 7 oclock.");
     nextStatus = millis() + millisToSeven;
   }
