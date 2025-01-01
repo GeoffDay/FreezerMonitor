@@ -21,6 +21,12 @@ LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars
 ESP8266WiFiMulti wifiMulti;
 const uint32_t connectTimeoutMs = 5000;      // WiFi connect timeout per AP. Increase when connecting takes longer.
 
+static const char _days_short[7][4] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+static const char _months_short[12][4] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+static const uint8_t _monthLength[2][12] = {
+    {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
+    {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}}; // Leap year
+
 //*********************************Time server***********************************************
 unsigned int localPort = 2390;        // local port to listen for UDP packets
 IPAddress timeServerIP;               // time.nist.gov NTP server address. Don't hardwire the IP address or we won't get the benefits of the pool.
@@ -40,26 +46,27 @@ const char *sensorNames[3] = {"Freezer1", "Freezer2", "Coolroom"};   // names to
 const char *shortSensorNames[3] = {"Frzr1", "Frzr2", "Clrm"};   // names to make string creation shorter
 char sensorTemps[3][6];               // and an array of strings for the converted temp values
 float sensorMinimums[3];              // and minimum values so that we can set 
-float sensorThresholds[3];            // different threshold for the different freezers and cool room.
 
 bool overTempAlarm = false;           // set this true if any of the sensors go overtemp
 bool risingTempAlarm = false;         // set this true if the rate of rise is too high.
-int loopCounter = 0;                  // count how many times we go through the loop
 long alarmGap = 0;                    // how lomg we wait between alarms
-char alarmTxt[17] = "";
+char alarmTxt[20] = "";
 
 //*************************************WhatsApp**********************************************
 //@author Hafidh Hidayat (hafidhhidayat@hotmail.com)   https://github.com/hafidhh/Callmebot_ESP8266
 // apiKey : Follow instruction on https://www.callmebot.com/blog/free-api-whatsapp-messages/
 String phoneNumber = "+61437325596";
 String apiKey = "1848095";
-char cmbMessage[60] = "";
+char cmbMessage[80] = "";
 
 
-char _buffer[20];
-char _buffer2[20];
+char _buffer[40];
+char _buffer2[40];
 unsigned long millisToSeven = 43200000UL;   // half a day  
 unsigned long nextStatus = 0;
+unsigned long previousMillis = 0UL;
+unsigned long delayInterval = 1000UL;
+
 
 
 void setup() {
@@ -81,25 +88,21 @@ void setup() {
   displayOnLCD(0, "Connecting", 2000);
 
 	while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED) {
-		delay(500);
+		myDelay(500);
 		lcd.print(".");
 	}
   
-
-  Serial.print(WiFi.SSID());
   sprintf(_buffer, "%s", WiFi.SSID().c_str());
   displayOnLCD("Connected", _buffer, 2000);
 
   //************************************* Time ***************************************
   displayOnLCD("Starting UDP", "Getting NTP time", 1000);
   udp.begin(localPort);
-  // Serial.print("Local port: ");
-  // Serial.println(udp.localPort());
 
   millisToSeven = getTime();
   sprintf(_buffer, "%ld ms", millisToSeven);
   displayOnLCD(_buffer, "to 7 oclock", 5000);
- //Serial.println("Got here");
+
   nextStatus = millis() + millisToSeven;
 
   //************************************ Temp sensors ********************************
@@ -127,19 +130,10 @@ void setup() {
   }
 
   sensors.setResolution(deviceAddress, 12);// set the resolution to 12 bit
-  delay(2000);
-    
-  // lcd.setCursor(0,0);   
-
-  // Serial.print("Device 0 Resolution: ");
-  // Serial.print(sensors.getResolution(deviceAddress), DEC);
-  // Serial.println();
   sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
-
 
   //********************************** start Call Me Bot service ***************************************
   displayOnLCD("Setting up", "WhatsApp service", 2000);
-  // lcd.clear();
 
   Callmebot.begin();
   strcpy(cmbMessage, "Start.");
@@ -160,7 +154,6 @@ void setup() {
 
 
 void loop() {
-  loopCounter++;                              // keep count of the number of times through the loop
   sensors.requestTemperatures();              // Request all on the bus to perform a temp conversion
 
   overTempAlarm = false;                      // reset each time through the loop 
@@ -173,19 +166,24 @@ void loop() {
     dtostrf(thisTemp, 3, 1, sensorTemps[i]);  // convert float to a string -> sensorTemps 
     sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
 
-    if (thisTemp > (sensorMinimums[i] / 4)) {                     // this should be lower and may need to be different for the different freezers
-      overTempAlarm = true;                   // set the over temp flag
-      strcpy(alarmTxt, "OverTemp! ");         // we're Melting Now!!!!
-    } else if (thisTemp > (sensorMinimums[i] / 2)) {
-      risingTempAlarm = true;                 // or the rising temp flag
-      strcpy(alarmTxt, "Rising Temp! ");      // alarm message
+    if (i == 2) {                             // cool room only
+      if (thisTemp > 5.0) {                   // assume 5C is the operating temp
+        overTempAlarm = true;                 // set the over temp flag
+        strcpy(alarmTxt, "OverTemp! ");       // we're too Hot!!!!
+      }
+    } else {
+      if (thisTemp > (sensorMinimums[i] / 4)) { // Freezers are below zero so /4 or /2 temps are warmer. 
+        overTempAlarm = true;                   // set the over temp flag
+        strcpy(alarmTxt, "OverTemp! ");         // we're Melting Now!!!!
+      } else if (thisTemp > (sensorMinimums[i] / 2)) {
+        risingTempAlarm = true;                 // or the rising temp flag
+        strcpy(alarmTxt, "Rising Temp! ");      // alarm message
+      }
     }
 
     displayOnLCD(_buffer, alarmTxt, 1000);    // display on LCD
 
-    if (thisTemp < sensorMinimums[i]) {
-      sensorMinimums[i] = thisTemp; // record the minimums
-    }
+    if (thisTemp < sensorMinimums[i]) sensorMinimums[i] = thisTemp; // record the minimums
   }
 
   if ((overTempAlarm) || (risingTempAlarm)) { // we have an alarm so create a message
@@ -194,14 +192,13 @@ void loop() {
     if (alarmGap % 2 == 0) lcd.backlight();   // backlight on.
     if (alarmGap % 2 == 1) lcd.noBacklight(); // backlight off.
 
-    for(int i=0;i<numberOfSensors; i++) {     // Loop through each temp sensor 
-      sprintf(_buffer, "%s: %sC ", shortSensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
-      strcat(cmbMessage, _buffer);            // and append it to the CallMeBot message
-    }
-
     if (alarmGap-- < 1) {
+      for(int i=0;i<numberOfSensors; i++) {     // Loop through each temp sensor 
+        sprintf(_buffer, "%s: %sC ", shortSensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
+        strcat(cmbMessage, _buffer);            // and append it to the CallMeBot message
+      }
       Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
-      alarmGap = 600 / numberOfSensors;       // with the 2 second delay this gives 10 mins between alarm messages
+      alarmGap = 600 / numberOfSensors;       // with the 1 second delay this gives 10 mins between alarm messages
     }
   } else {
       alarmGap = 0;                           // if no alarms set gap to zero
@@ -237,7 +234,7 @@ void loop() {
 unsigned long getTime() {
   WiFi.hostByName(ntpServerName, timeServerIP);   // get a random server from the pool
   sendNTPpacket(timeServerIP);                    // send an NTP packet to a time server
-  delay(1000);                                    // wait to see if a reply is available
+  myDelay(1000);                                    // wait to see if a reply is available
   
   unsigned long secondsToSeven = 0;
   int cb = udp.parsePacket();
@@ -263,11 +260,11 @@ unsigned long getTime() {
     unsigned long epoch = secsSince1900 - seventyYears;                 // subtract seventy years:
         
     sprintf(_buffer, "Unix: %ld", epoch);       // print Unix time:
-    sprintf(_buffer2, "Timezone +9.5 hrs.");  // show timezone
+    sprintf(_buffer2, "Timezone +9.5 hrs.");    // show timezone
     displayOnLCD(_buffer, _buffer2, 2000);
     epoch += 9.5 * 3600;                        // adjust for timezone
 
-    sprintf(_buffer, "Day of week %ld.", ((epoch/86400) + 4)%7);
+    sprintf(_buffer, "Day of week %ld.", ((epoch / 86400) + 4) % 7);
     displayOnLCD(0, _buffer, 2000);
 
     unsigned long dailySeconds = epoch % 86400;
@@ -299,12 +296,20 @@ unsigned long getTime() {
 }
 
 
+void myDelay(unsigned long delayInterval){
+  unsigned long currentMillis = millis();
+  while (currentMillis - previousMillis < delayInterval){/* do nothing*/}
+
+ 	previousMillis = currentMillis; // finished so update the previousMillis value
+}
+
+
 void displayOnLCD(int row, String charArray, int dDelay)
 {
   lcd.clear();
   lcd.setCursor(0, row); 
   lcd.print(charArray);
-  delay(dDelay);
+  myDelay(dDelay);
 }
 
 
@@ -315,7 +320,7 @@ void displayOnLCD(String charArray, String char_Array, int dDelay)
   lcd.print(charArray);
   lcd.setCursor(0, 1); 
   lcd.print(char_Array);
-  delay(dDelay);
+  myDelay(dDelay);
 }
 
 
