@@ -19,13 +19,13 @@
 LiquidCrystal_I2C lcd(0x27,16,2);  // set the LCD address to 0x27 for a 16 chars and 2 line display
 
 ESP8266WiFiMulti wifiMulti;
-const uint32_t connectTimeoutMs = 5000;      // WiFi connect timeout per AP. Increase when connecting takes longer.
+const uint32_t connectTimeoutMs = 10000;      // WiFi connect timeout per AP. Increase when connecting takes longer.
 
-static const char _days_short[7][4] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-static const char _months_short[12][4] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-static const uint8_t _monthLength[2][12] = {
-    {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
-    {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}}; // Leap year
+// static const char _days_short[7][4] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+// static const char _months_short[12][4] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+// static const uint8_t _monthLength[2][12] = {
+//     {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
+//     {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}}; // Leap year
 
 //*********************************Time server***********************************************
 unsigned int localPort = 2390;        // local port to listen for UDP packets
@@ -57,15 +57,15 @@ char alarmTxt[20] = "";
 // apiKey : Follow instruction on https://www.callmebot.com/blog/free-api-whatsapp-messages/
 String phoneNumber = "+61437325596";
 String apiKey = "1848095";
+
 char cmbMessage[80] = "";
-
-
 char _buffer[40];
 char _buffer2[40];
+
 unsigned long millisToSeven = 43200000UL;   // half a day  
 unsigned long nextStatus = 0;
 unsigned long previousMillis = 0UL;
-unsigned long delayInterval = 1000UL;
+// unsigned long delayInterval = 1000UL;
 
 
 
@@ -74,7 +74,8 @@ void setup() {
   lcd.backlight();
   lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
   lcd.display();
-  displayOnLCD("Hi. loading code", "Ver 241230", 2000);
+
+  displayOnLCD("Hi. loading code", "Ver 250104", 2000);
 
 	Serial.begin(115200);           // serial on 115200 baud
 
@@ -85,10 +86,8 @@ void setup() {
   wifiMulti.addAP("Airport", "Hol_0406");
   wifiMulti.addAP("realme 5", "evaevaeva");
 
-  displayOnLCD(0, "Connecting", 2000);
-
-	while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED) {
-		myDelay(500);
+  while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED) {
+		delay(500);
 		lcd.print(".");
 	}
   
@@ -101,7 +100,7 @@ void setup() {
 
   millisToSeven = getTime();
   sprintf(_buffer, "%ld ms", millisToSeven);
-  displayOnLCD(_buffer, "to 7 oclock", 5000);
+  displayOnLCD(_buffer, "to 7 oclock", 2000);
 
   nextStatus = millis() + millisToSeven;
 
@@ -116,8 +115,8 @@ void setup() {
     sprintf(_buffer, "%s %d %s", "Found", numberOfSensors, "Sensors.");
     displayOnLCD(0, _buffer, 2000);
 
-    for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out address      
-      if(sensors.getAddress(deviceAddress, i)){// Search the wire for address
+    for(int i=0;i<numberOfSensors; i++){          // Loop through each device, print out temps      
+      if(sensors.getAddress(deviceAddress, i)) {  // Search the wire for address
         sprintf(_buffer, "found sensor %d", i);
         dtostrf(sensors.getTempC(deviceAddress), 3, 1, sensorTemps[i]); 
         sprintf(_buffer2, "%s: %sC", sensorNames[i], sensorTemps[i]);
@@ -129,8 +128,8 @@ void setup() {
     }
   }
 
-  sensors.setResolution(deviceAddress, 12);// set the resolution to 12 bit
-  sensors.requestTemperatures();    // Request all on the bus to perform a temp conversion
+  sensors.setResolution(deviceAddress, 12);       // set the resolution to 12 bit
+  sensors.requestTemperatures();                  // Request all on the bus to perform a temp conversion
 
   //********************************** start Call Me Bot service ***************************************
   displayOnLCD("Setting up", "WhatsApp service", 2000);
@@ -149,6 +148,9 @@ void setup() {
  
   Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);	 // and send the message
 	displayOnLCD(0, Callmebot.debug(), 2000);     // display the response
+  
+  displayOnLCD("Message Sent", "Disconnecting", 1000);
+  WiFi.disconnect();
 }
 
 
@@ -174,12 +176,13 @@ void loop() {
     } else {
       if (thisTemp > (sensorMinimums[i] / 4)) { // Freezers are below zero so /4 or /2 temps are warmer. 
         overTempAlarm = true;                   // set the over temp flag
-        strcpy(alarmTxt, "OverTemp! ");         // we're Melting Now!!!!
+        strcpy(alarmTxt, "Over Temp! ");         // we're Melting Now!!!!
       } else if (thisTemp > (sensorMinimums[i] / 2)) {
         risingTempAlarm = true;                 // or the rising temp flag
         strcpy(alarmTxt, "Rising Temp! ");      // alarm message
       }
     }
+    
 
     displayOnLCD(_buffer, alarmTxt, 1000);    // display on LCD
 
@@ -197,8 +200,18 @@ void loop() {
         sprintf(_buffer, "%s: %sC ", shortSensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
         strcat(cmbMessage, _buffer);            // and append it to the CallMeBot message
       }
-      Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
-      alarmGap = 600 / numberOfSensors;       // with the 1 second delay this gives 10 mins between alarm messages
+
+      displayOnLCD(0, "Connecting", 2000);
+
+	    if (wifiMulti.run(connectTimeoutMs) == WL_CONNECTED) {
+        sprintf(_buffer, "%s", WiFi.SSID().c_str());
+        displayOnLCD("Connected", _buffer, 1000);
+        
+        Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
+        alarmGap = 600 / numberOfSensors;       // with the 1 second delay this gives 10 mins between alarm messages
+        displayOnLCD("Message Sent", "Disconnecting", 1000);
+        WiFi.disconnect();
+      }
     }
   } else {
       alarmGap = 0;                           // if no alarms set gap to zero
@@ -214,15 +227,28 @@ void loop() {
       sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);  // combine with names
       strcat(cmbMessage, _buffer);  // append
     }
-    strcat(cmbMessage, "Mins: ");
+
+    strcat(cmbMessage, "Minimums: ");
+    
     for(int i=0;i<numberOfSensors; i++){      // Loop through each device     
       dtostrf(sensorMinimums[i], 3, 1, sensorTemps[i]); 
       sprintf(_buffer, " %s: %sC", shortSensorNames[i], sensorTemps[i]);
       strcat(cmbMessage, _buffer);
     }
 
-    Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);
-    millisToSeven = getTime();
+    displayOnLCD(0, "Connecting", 2000);
+
+    if (wifiMulti.run(connectTimeoutMs) == WL_CONNECTED) {
+      sprintf(_buffer, "%s", WiFi.SSID().c_str());
+      displayOnLCD("Connected", _buffer, 1000);
+      
+      Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
+      millisToSeven = getTime();
+
+      displayOnLCD("Message Sent", "Disconnecting", 1000);
+      WiFi.disconnect();
+    }
+
     Serial.print(millisToSeven);                      
     Serial.println(" milliseconds to 7 oclock.");
     nextStatus = millis() + millisToSeven;
@@ -234,7 +260,7 @@ void loop() {
 unsigned long getTime() {
   WiFi.hostByName(ntpServerName, timeServerIP);   // get a random server from the pool
   sendNTPpacket(timeServerIP);                    // send an NTP packet to a time server
-  myDelay(1000);                                    // wait to see if a reply is available
+  delay(1000);                                    // wait to see if a reply is available
   
   unsigned long secondsToSeven = 0;
   int cb = udp.parsePacket();
@@ -296,12 +322,6 @@ unsigned long getTime() {
 }
 
 
-void myDelay(unsigned long delayInterval){
-  unsigned long currentMillis = millis();
-  while (currentMillis - previousMillis < delayInterval){/* do nothing*/}
-
- 	previousMillis = currentMillis; // finished so update the previousMillis value
-}
 
 
 void displayOnLCD(int row, String charArray, int dDelay)
@@ -309,7 +329,7 @@ void displayOnLCD(int row, String charArray, int dDelay)
   lcd.clear();
   lcd.setCursor(0, row); 
   lcd.print(charArray);
-  myDelay(dDelay);
+  delay(dDelay);
 }
 
 
@@ -320,7 +340,7 @@ void displayOnLCD(String charArray, String char_Array, int dDelay)
   lcd.print(charArray);
   lcd.setCursor(0, 1); 
   lcd.print(char_Array);
-  myDelay(dDelay);
+  delay(dDelay);
 }
 
 
