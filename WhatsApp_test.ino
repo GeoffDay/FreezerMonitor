@@ -49,6 +49,7 @@ float sensorMinimums[3];              // and minimum values so that we can set
 
 bool overTempAlarm = false;           // set this true if any of the sensors go overtemp
 bool risingTempAlarm = false;         // set this true if the rate of rise is too high.
+bool sensorFault = false;             // set true if sensor temp is -127.0, what you get if the sensor disconnected 
 long alarmGap = 0;                    // how lomg we wait between alarms
 char alarmTxt[20] = "";
 
@@ -75,7 +76,7 @@ void setup() {
   lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
   lcd.display();
 
-  displayOnLCD("Hi. loading code", "Ver 250104", 2000);
+  displayOnLCD("Freezer Monitor", "Ver 250105", 2000);
 
 	Serial.begin(115200);           // serial on 115200 baud
 
@@ -160,6 +161,7 @@ void loop() {
 
   overTempAlarm = false;                      // reset each time through the loop 
   risingTempAlarm = false;
+  sensorFault = false;
   strcpy(alarmTxt, "");                       // set this to null too.
 
   for(int i=0;i<numberOfSensors; i++) {       // Loop through each temp sensor 
@@ -169,10 +171,10 @@ void loop() {
     sprintf(_buffer, "%s: %sC", sensorNames[i], sensorTemps[i]);  // create the string for the whatsapp message
 
     if (i == 2) {                             // cool room only
-      if (thisTemp > 5.0) {                   // assume 5C is the operating temp
+      if (thisTemp > 6.0) {                   // assume 5C is the operating temp
         overTempAlarm = true;                 // set the over temp flag
         strcpy(alarmTxt, "OverTemp! ");       // we're too Hot!!!!
-      }
+      } 
     } else {
       if (thisTemp > (sensorMinimums[i] / 4)) { // Freezers are below zero so /4 or /2 temps are warmer. 
         overTempAlarm = true;                   // set the over temp flag
@@ -183,13 +185,17 @@ void loop() {
       }
     }
     
+    if (thisTemp == -127.0) {
+      sensorFault = true;
+      strcpy(alarmTxt, "Sensor Fault! ");       // We've been disconnected
+    }
 
     displayOnLCD(_buffer, alarmTxt, 1000);    // display on LCD
 
     if (thisTemp < sensorMinimums[i]) sensorMinimums[i] = thisTemp; // record the minimums
   }
 
-  if ((overTempAlarm) || (risingTempAlarm)) { // we have an alarm so create a message
+  if ((overTempAlarm) || (risingTempAlarm) || (sensorFault)) { // we have an alarm so create a message
     strcpy(cmbMessage, alarmTxt);             // stick the alarm message into the CallMeBot message
 
     if (alarmGap % 2 == 0) lcd.backlight();   // backlight on.
