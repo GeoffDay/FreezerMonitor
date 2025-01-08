@@ -6,6 +6,8 @@
 // 1.0 degrees in an hour 28 Dec 2024. 
 // May be better to find out what the minimum temps are and give a couple of warnings when 
 // various thresholds are reached. 29 Dec 2024. 
+// Rejigged wifi to check connection before sending data. Added coolroom that works at 0 to 5C. 
+// Appears to work OK now but haven't had coolroom operating yet. 8 Jan 2024.  
 
 #include <LiquidCrystal_I2C.h>
 // #include <ESP8266WiFi.h>                 // wifi
@@ -150,8 +152,8 @@ void setup() {
   Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage);	 // and send the message
 	displayOnLCD(0, Callmebot.debug(), 2000);     // display the response
   
-  displayOnLCD("Message Sent", "Disconnecting", 1000);
-  WiFi.disconnect();
+  displayOnLCD("Message Sent", "not Disconnecting", 1000);
+  //WiFi.disconnect();
 }
 
 
@@ -215,8 +217,8 @@ void loop() {
         
         Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
         alarmGap = 600 / numberOfSensors;       // with the 1 second delay this gives 10 mins between alarm messages
-        displayOnLCD("Message Sent", "Disconnecting", 1000);
-        WiFi.disconnect();
+        displayOnLCD("Message Sent", "not Disconnecting", 1000);
+        //WiFi.disconnect();
       }
     }
   } else {
@@ -251,8 +253,8 @@ void loop() {
       Callmebot.whatsappMessage(phoneNumber, apiKey, cmbMessage); // send a whatsapp message
       millisToSeven = getTime();
 
-      displayOnLCD("Message Sent", "Disconnecting", 1000);
-      WiFi.disconnect();
+      displayOnLCD("Message Sent", "not Disconnecting", 1000);
+      //WiFi.disconnect();
     }
 
     Serial.print(millisToSeven);                      
