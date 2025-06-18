@@ -235,7 +235,7 @@ void loop() {
       strcat(cmbMessage, _buffer);  // append
     }
 
-    strcat(cmbMessage, "Minimums: ");
+    strcat(cmbMessage, " Minimums: ");
     
     for(int i=0;i<numberOfSensors; i++){      // Loop through each device     
       dtostrf(sensorMinimums[i], 3, 1, sensorTemps[i]); 
