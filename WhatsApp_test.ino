@@ -187,14 +187,13 @@ void loop() {
       }
     }
     
-    if (thisTemp == -127.0) {
+    if (thisTemp == -127.0) { 
       sensorFault = true;
       strcpy(alarmTxt, "Sensor Fault! ");       // We've been disconnected
-    }
-
+    } else {
+      if (thisTemp < sensorMinimums[i]) sensorMinimums[i] = thisTemp; // record the minimums in sensor is OK  
+    }	    
     displayOnLCD(_buffer, alarmTxt, 1000);    // display on LCD
-
-    if (thisTemp < sensorMinimums[i]) sensorMinimums[i] = thisTemp; // record the minimums
   }
 
   if ((overTempAlarm) || (risingTempAlarm) || (sensorFault)) { // we have an alarm so create a message
