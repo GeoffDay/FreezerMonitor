@@ -8,6 +8,7 @@
 // various thresholds are reached. 29 Dec 2024. 
 // Rejigged wifi to check connection before sending data. Added coolroom that works at 0 to 5C. 
 // Appears to work OK now but haven't had coolroom operating yet. 8 Jan 2024.  
+// if sensor disconnected dont update minimums. 250707
 
 #include <LiquidCrystal_I2C.h>
 // #include <ESP8266WiFi.h>                 // wifi
@@ -78,7 +79,7 @@ void setup() {
   lcd.begin(16, 2);               // set up the LCD's number of columns and rows:
   lcd.display();
 
-  displayOnLCD("Freezer Monitor", "Ver 250105", 2000);
+  displayOnLCD("Freezer Monitor", "Ver 250707", 2000);
 
 	Serial.begin(115200);           // serial on 115200 baud
 
